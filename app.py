@@ -9,6 +9,7 @@ from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
 from aliyunsdkcore.auth.credentials import AccessKeyCredential
 import nls
+from dotenv import load_dotenv, find_dotenv
 
 # 配置页面
 st.set_page_config(page_title="会议记录与总结软件", layout="wide")
@@ -20,16 +21,20 @@ if 'transcription' not in st.session_state:
     st.session_state.transcription = ""
 if 'summary' not in st.session_state:
     st.session_state.summary = ""
+if 'recorder' not in st.session_state:  # 新增用于存储 RealtimeMeetingRecorder 实例
+    st.session_state.recorder = None
 
 # 阿里云配置
-ALIBABA_CLOUD_ACCESS_KEY_ID = os.environ.get('ALIBABA_CLOUD_ACCESS_KEY_ID')
-ALIBABA_CLOUD_ACCESS_KEY_SECRET = os.environ.get('ALIBABA_CLOUD_ACCESS_KEY_SECRET')
-APP_KEY = ''
+load_dotenv(find_dotenv())
+ALIBABA_CLOUD_ACCESS_KEY_ID = os.getenv('ALIBABA_CLOUD_ACCESS_KEY_ID')
+ALIBABA_CLOUD_ACCESS_KEY_SECRET = os.getenv('ALIBABA_CLOUD_ACCESS_KEY_SECRET')
+APP_KEY = os.getenv('APP_KEY')
 NLS_URL = "wss://nls-gateway.cn-shanghai.aliyuncs.com/ws/v1"
 
 # 创建AcsClient实例
 credentials = AccessKeyCredential(ALIBABA_CLOUD_ACCESS_KEY_ID, ALIBABA_CLOUD_ACCESS_KEY_SECRET)
 client = AcsClient(region_id='cn-beijing', credential=credentials)
+
 
 def create_task():
     request = CommonRequest()
@@ -40,7 +45,7 @@ def create_task():
     request.set_protocol_type('https')
     request.set_uri_pattern('/openapi/tingwu/v2/tasks')
     request.add_query_param('type', 'realtime')
-    
+
     body = {
         "AppKey": APP_KEY,
         "Input": {
@@ -61,10 +66,13 @@ def create_task():
             }
         }
     }
-    
+
     request.set_content(json.dumps(body).encode('utf-8'))
     response = client.do_action_with_exception(request)
-    return json.loads(response)
+    task_response = json.loads(response)
+    print("Task Response:", task_response)
+    return task_response
+
 
 def stop_task(task_id):
     request = CommonRequest()
@@ -76,17 +84,18 @@ def stop_task(task_id):
     request.set_uri_pattern('/openapi/tingwu/v2/tasks')
     request.add_query_param('type', 'realtime')
     request.add_query_param('operation', 'stop')
-    
+
     body = {
         "AppKey": APP_KEY,
         "Input": {
             "TaskId": task_id
         }
     }
-    
+
     request.set_content(json.dumps(body).encode('utf-8'))
     response = client.do_action_with_exception(request)
     return json.loads(response)
+
 
 def get_result(task_id):
     request = CommonRequest()
@@ -96,9 +105,10 @@ def get_result(task_id):
     request.set_version('2023-09-30')
     request.set_protocol_type('https')
     request.set_uri_pattern(f'/openapi/tingwu/v2/tasks/{task_id}')
-    
+
     response = client.do_action_with_exception(request)
     return json.loads(response)
+
 
 class RealtimeMeetingRecorder:
     def __init__(self, url):
@@ -108,11 +118,11 @@ class RealtimeMeetingRecorder:
         self.task_id = None
 
     def on_sentence_begin(self, message, *args):
-        print("Sentence begin:", message)
+        print("Sentence begin:\n", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
 
     def on_sentence_end(self, message, *args):
-        print("Sentence end:", message)
-        sentence = json.loads(message)['payload']['text']
+        print("Sentence end:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
+        sentence = json.loads(message)['payload']['result']
         st.session_state.transcription += f"{sentence}\n"
 
     def on_result_changed(self, message, *args):
@@ -124,27 +134,27 @@ class RealtimeMeetingRecorder:
     def start_recording(self):
         self.is_recording = True
         task_response = create_task()
-        self.task_id = task_response['TaskId']
-        
+        self.task_id = task_response['Data']['TaskId']
+
         rm = nls.NlsRealtimeMeeting(
-            url=self.url,
+            url=task_response['Data']['MeetingJoinUrl'],
             on_sentence_begin=self.on_sentence_begin,
             on_sentence_end=self.on_sentence_end,
             on_result_changed=self.on_result_changed,
             on_completed=self.on_completed
         )
-        
+
         rm.start()
-        
+
         sample_rate = 16000
         samples_per_read = int(0.1 * sample_rate)
-        
+
         with sd.InputStream(channels=1, dtype="int16", samplerate=sample_rate) as s:
             while self.is_recording:
                 samples, _ = s.read(samples_per_read)
                 rm.send_audio(samples.tobytes())
                 time.sleep(0.01)
-        
+
         rm.stop()
 
     def stop_recording(self):
@@ -154,15 +164,20 @@ class RealtimeMeetingRecorder:
             result = get_result(self.task_id)
             st.session_state.summary = result.get('Summarization', {}).get('Paragraph', '')
 
+
 def start_recording():
     st.session_state.recording = True
     recorder = RealtimeMeetingRecorder(NLS_URL)
+    st.session_state.recorder = recorder  # 将实例存储在 session_state 中
     threading.Thread(target=recorder.start_recording, daemon=True).start()
+
 
 def stop_recording():
     st.session_state.recording = False
-    # 这里应该调用recorder的stop_recording方法，但由于作用域限制，我们需要另一种方式来停止录音
-    # 在实际应用中，您可能需要重构代码以使recorder可以在这里访问
+    if st.session_state.recorder:  # 检查 recorder 是否已经初始化
+        st.session_state.recorder.stop_recording()  # 调用 stop_recording 方法
+        st.session_state.recorder = None  # 清除 recorder
+
 
 # Streamlit UI
 st.title("会议记录与总结软件")
