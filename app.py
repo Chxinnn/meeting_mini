@@ -1,5 +1,6 @@
 # app.py
 import streamlit as st
+
 from recorder import RealtimeMeetingRecorder
 from aliyun_client import AliyunClient
 import config
@@ -23,6 +24,7 @@ def main():
     if st.button("停止录音"):
         summary = st.session_state.recorder.stop_recording()
         st.write("会议总结:", summary)
+
 
 if __name__ == "__main__":
     main()
