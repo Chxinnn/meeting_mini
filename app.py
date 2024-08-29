@@ -1,4 +1,5 @@
 # app.py
+import threading
 import streamlit as st
 
 from recorder import RealtimeMeetingRecorder
@@ -28,7 +29,7 @@ def main():
     with col1:
         st.subheader("控制面板")
         if st.button("开始录音"):
-            st.session_state.recorder.start_recording()
+            threading.Thread(target=st.session_state.recorder.start_recording, daemon=True).start()
             # TODO
             st.session_state.transcription = ""
         if st.button("停止录音"):
