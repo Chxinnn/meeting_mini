@@ -16,11 +16,11 @@ class RealtimeMeetingRecorder:
 
     def start_recording(self):
         self.is_recording = True
-        print("task创建完成\n")
-        task_response = self.aliyun_client.create_task()
+        task_response = self.aliyun_client.create_task(summarization_enabled=True)
         print(task_response)
-        self.task_id = task_response['Data']['TaskId']
-        self.meeting_join_url = task_response['Data'].get('MeetingJoinUrl')
+        print("task创建完成\n")
+        self.task_id = task_response[0]
+        self.meeting_join_url = task_response[1]
 
         print(f"TaskId: {self.task_id}")
         print(f"MeetingJoinUrl: {self.meeting_join_url}")
@@ -33,4 +33,5 @@ class RealtimeMeetingRecorder:
         if self.task_id:
             self.aliyun_client.stop_task(self.task_id)
             result = self.aliyun_client.get_result(self.task_id)
-            return result.get('Summarization', {}).get('Paragraph', '')
+            return result
+            # return result.get('Summarization', {}).get('Paragraph', '')
