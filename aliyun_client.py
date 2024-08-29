@@ -5,13 +5,14 @@ from aliyunsdkcore.request import CommonRequest
 import json
 import time
 
+
 class AliyunClient:
     def __init__(self, access_key_id, access_key_secret, app_key, region_id='cn-beijing'):
         self.app_key = app_key
         credentials = AccessKeyCredential(access_key_id, access_key_secret)
         self.client = AcsClient(region_id=region_id, credential=credentials)
 
-    def build_request(self,summarization_enabled, task_id, status):
+    def build_request(self, summarization_enabled, task_id, status):
         request = CommonRequest()
         request.set_accept_format('json')
         request.set_domain('tingwu.cn-beijing.aliyuncs.com')
@@ -20,7 +21,7 @@ class AliyunClient:
         request.set_protocol_type('https')
         request.set_uri_pattern('/openapi/tingwu/v2/tasks')
         request.add_query_param('type', 'realtime')
-        if(status == 'start'):
+        if (status == 'start'):
             body = {
                 "AppKey": self.app_key,
                 "Input": {
@@ -42,10 +43,10 @@ class AliyunClient:
                     }
                 }
             }
-        if(status == 'stop'):
+        if (status == 'stop'):
             body = {
                 'AppKey': self.app_key,
-                'Input':{
+                'Input': {
                     'TaskId': task_id
                 }
             }
@@ -54,9 +55,9 @@ class AliyunClient:
         request.add_query_param('type', 'realtime')
         request.set_content(json.dumps(body).encode('utf-8'))
         return request
-    
-    def create_task(self,summarization_enabled):
-        request = self.build_request(summarization_enabled,'0','start')
+
+    def create_task(self, summarization_enabled):
+        request = self.build_request(summarization_enabled, '0', 'start')
         response = self.client.do_action_with_exception(request)
         response_json = json.loads(response)
         if response_json['Message'] == 'success':
@@ -67,13 +68,9 @@ class AliyunClient:
         meeting_join_url = response_json['Data']['MeetingJoinUrl']
         return task_id, meeting_join_url
 
-
-
-
-
     def stop_task(self, task_id):
         pass
 
     def get_result(self, task_id):
         # 实现get_result逻辑
-        pass
+        return "test_result"
