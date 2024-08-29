@@ -5,6 +5,7 @@ from aliyunsdkcore.request import CommonRequest
 import json
 import time
 
+
 class AliyunClient:
     def __init__(self, access_key_id, access_key_secret, app_key, region_id='cn-beijing'):
         self.app_key = app_key
@@ -12,6 +13,7 @@ class AliyunClient:
         self.client = AcsClient(region_id=region_id, credential=credentials)
 
     def build_request(self, summarization_enabled, task_id, status):
+        global body
         request = CommonRequest()
         request.set_accept_format('json')
         request.set_domain('tingwu.cn-beijing.aliyuncs.com')
@@ -19,9 +21,10 @@ class AliyunClient:
         request.set_version('2023-09-30')
         request.set_protocol_type('https')
         request.set_uri_pattern('/openapi/tingwu/v2/tasks')
+        request.add_query_param('type', 'realtime')
         if (status == 'get'):
             request.set_method('GET')
-            request.set_uri_pattern( '/openapi/tingwu/v2/tasks' + '/' + task_id)
+            request.set_uri_pattern('/openapi/tingwu/v2/tasks' + '/' + task_id)
             return request
         if (status == 'start'):
             body = {
@@ -53,12 +56,10 @@ class AliyunClient:
                 }
             }
             request.add_query_param('operation', 'stop')
-
-        request.add_query_param('type', 'realtime')
         request.set_content(json.dumps(body).encode('utf-8'))
         return request
-    
-# TODO 加入异常处理类
+
+    # TODO 加入异常处理类
 
     def create_task(self, summarization_enabled):
         request = self.build_request(summarization_enabled, '0', 'start')
@@ -83,18 +84,19 @@ class AliyunClient:
         request = self.build_request(False, task_id, 'get')
         response = self.client.do_action_with_exception(request)
         response_json = json.loads(response)
+        print(json.dumps(response_json, indent=4, ensure_ascii=False))
         if response_json['Message'] == 'success':
             print("查询消息接收成功")
         task_status = response_json['Data']['TaskStatus']
-        if(task_status == 'FAILED'):
+        if (task_status == 'FAILED'):
             print('FAILED' + response_json['Data']['ErrorCode'] + response_json['Data']['ErrorMessage'])
-        if(task_status == 'ONGOING' and not response_json['Data']['Result']):
+        if (task_status == 'ONGOING' and not response_json['Data']['Result']):
             print("ONGOING BUT NOT RESULT")
             return None
-        if(task_status == 'ONGOING' and response_json['Data']['Result']):
+        if (task_status == 'ONGOING' and response_json['Data']['Result']):
             print("ONGOING AND RESULT")
             return response_json['Data']['Result']
-        if(task_status == 'COMPLETED'):
+        if (task_status == 'COMPLETED'):
             print("COMPLETED")
             return response_json['Data']['Result']
         return None
