@@ -1,9 +1,6 @@
 # app.py
-import nls
-import json
-import time
-import queue
-import pydub
+import threading
+import streamlit as st
 import config
 import streamlit as st
 from aliyunsdkcore.client import AcsClient
@@ -276,13 +273,12 @@ def main():
 
     with col1:
         st.subheader("控制面板")
-        webrtc_ctx = webrtc_streamer(
-            key="speech-to-text",
-            mode=WebRtcMode.SENDONLY,
-            audio_receiver_size=20480,
-            rtc_configuration=rtc_configuration,
-            media_stream_constraints={"video": False, "audio": True},
-        )
+        if st.button("开始录音"):
+            threading.Thread(target=st.session_state.recorder.start_recording, daemon=True).start()
+            # TODO
+            st.session_state.transcription = ""
+        if st.button("停止录音"):
+            st.session_state.summary = st.session_state.recorder.stop_recording()
 
         status_indicator = st.empty()
 
