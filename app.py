@@ -1,64 +1,58 @@
+# app.py
 import threading
 import streamlit as st
+
 from recorder import RealtimeMeetingRecorder
 from aliyun_client import AliyunClient
 import config
-import time
-import share_variable
-def initialize_session_state():
-    if 'is_recording' not in st.session_state:
-        st.session_state.is_recording = False
+
 
 def main():
-    aliyun_client = AliyunClient(
+    st.set_page_config(page_title="会议记录与总结软件", layout="wide")
+    st.title("会议记录与总结软件")
+    # 初始化会话状态
+    if 'recorder' not in st.session_state:
+        aliyun_client = AliyunClient(
             access_key_id=config.ALIBABA_CLOUD_ACCESS_KEY_ID,
             access_key_secret=config.ALIBABA_CLOUD_ACCESS_KEY_SECRET,
             app_key=config.APP_KEY
         )
-    initialize_session_state() 
-    st.set_page_config(page_title="会议记录与总结软件", layout="wide")
-    st.title("会议记录与总结软件")
+        st.session_state.recorder = RealtimeMeetingRecorder(config.NLS_URL, aliyun_client)
+    if 'transcription' not in st.session_state:
+        st.session_state.transcription = ""
+    if 'summary' not in st.session_state:
+        st.session_state.summary = ""
 
-    recorder = RealtimeMeetingRecorder(config.NLS_URL, aliyun_client)
-    
+    # 实现Streamlit界面和交互逻辑
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("控制面板")
-        if not st.session_state.is_recording:
-            if st.button("开始录音"):
-                st.session_state.is_recording = True
-                threading.Thread(target=recorder.start_recording, daemon=True).start()
-                #threading.Thread(target=update_transcription, daemon=True).start()
-        else:
-            if st.button("停止录音"):
-                st.session_state.is_recording = False
-                share_variable.stopflag = True
-                recorder.stop_recording()
-                # st.session_state.summary = st.session_state.recorder.stop_recording()
+        if st.button("开始录音"):
+            threading.Thread(target=st.session_state.recorder.start_recording, daemon=True).start()
+            # TODO
+            st.session_state.transcription = ""
+        if st.button("停止录音"):
+            st.session_state.summary = st.session_state.recorder.stop_recording()
+
     with col2:
         st.subheader("实时转录")
-        transcription_box = st.empty()  # 占位符
+        st.text_area("转录内容", value=st.session_state.transcription, height=300, key="transcription_area")
 
-        try:
-            while st.session_state.is_recording:
-                # 只更新 text_area 的内容，不重新创建它
-                transcription_box.write(recorder.transcription)
-                time.sleep(1)  # 每秒刷新一次变量的值
-        except KeyboardInterrupt:
-            print("程序结束")
+    st.subheader("会议摘要")
+    st.text_area("摘要内容", value=st.session_state.summary, height=200, key="summary_area")
 
-    
-
-    # Meeting text management functionality
+    # 会议文本管理功能（基础实现）
     st.subheader("会议记录管理")
     if st.button("保存会议记录"):
-        # Implement saving functionality here
+        # 这里应该实现保存功能，比如保存到文件或数据库
         st.success("会议记录已保存")
 
     if st.button("清除当前记录"):
         st.session_state.transcription = ""
         st.session_state.summary = ""
+        # st.experimental_rerun()
+
 
 if __name__ == "__main__":
     main()

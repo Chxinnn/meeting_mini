@@ -34,14 +34,14 @@ class AliyunClient:
                     "SampleRate": 16000,
                     "SourceLanguage": "cn",
                     "TaskKey": f"task{int(time.time())}",
-                    "ProgressiveCallbacksEnabled": False,
+                    "ProgressiveCallbacksEnabled": False
                 },
                 "Parameters": {
                     "Transcription": {
                         "OutputLevel": 2,
                         "DiarizationEnabled": True,
                         "Diarization": {"SpeakerCount": 2}
-                    }, 
+                    },
                     "SummarizationEnabled": summarization_enabled,
                     "Summarization": {
                         "Types": ["Paragraph", "Conversational"]

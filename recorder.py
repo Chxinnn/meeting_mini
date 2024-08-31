@@ -3,8 +3,7 @@ import json
 import nls
 import sounddevice as sd
 import time
-import wave
-import share_variable
+
 class RealtimeMeetingRecorder:
     def __init__(self, url, aliyun_client):
         self.url = url
@@ -13,8 +12,6 @@ class RealtimeMeetingRecorder:
         self.task_id = None
         self.meeting_join_url = None
         self.rm = None
-        self.transcription = ""
-        self.stopflag = False
 
     # 实现各种回调方法和录音逻辑
     def on_sentence_begin(self, message, *args):
@@ -23,19 +20,15 @@ class RealtimeMeetingRecorder:
     def on_sentence_end(self, message, *args):
         print("Sentence end:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
         sentence = json.loads(message)['payload']['result']
-        self.transcription += f"{sentence}\n"
-        print(self.transcription)
+        print(sentence)
+        return sentence
+        # st.session_state.transcription += f"{sentence}\n"
+
     def on_result_changed(self, message, *args):
-        # print("Result changed:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
-        pass
+        print("Result changed:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
+
     def on_completed(self, message, *args):
         print("Completed:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
-    
-    def on_error(self, message, *args):
-        print("on_error message=>{} args=>{}".format(message, args))
-
-    def on_close(self, *args):
-        print("on_close: args=>{}".format(args))
 
     def start_recording(self):
         self.is_recording = True
@@ -53,23 +46,11 @@ class RealtimeMeetingRecorder:
             on_sentence_begin=self.on_sentence_begin,
             on_sentence_end=self.on_sentence_end,
             on_result_changed=self.on_result_changed,
-            on_completed=self.on_completed,
-            on_error=self.on_error,
-            on_close=self.on_close
+            on_completed=self.on_completed
         )
 
         self.rm.start()
-         # 读取音频文件并发送音频数据
-        with wave.open("female_sound.wav", 'rb') as wf:
-            chunk_size = 640  # 每次读取640字节
-            data = wf.readframes(chunk_size)
-            while data:
-                self.rm.send_audio(data)
-                time.sleep(0.01)  # 模拟实时发送音频
-                data = wf.readframes(chunk_size)
-                if(share_variable.stopflag):
-                    return
-        """
+
         sample_rate = 16000
         samples_per_read = int(0.1 * sample_rate)
 
@@ -78,10 +59,10 @@ class RealtimeMeetingRecorder:
                 samples, _ = s.read(samples_per_read)
                 self.rm.send_audio(samples.tobytes())
                 time.sleep(0.01)
-        """
+
     def stop_recording(self):
         self.is_recording = False
-        if self.rm:
+        if self.rm is not None:
             self.rm.stop()
             self.rm = None
         if self.task_id:
