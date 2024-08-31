@@ -11,6 +11,7 @@ import pydub
 >>>>>>> f2a6b2d (重构项目&完善录音逻辑&完成实时转录)
 import config
 import streamlit as st
+import tool
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
 from aliyunsdkcore.auth.credentials import AccessKeyCredential
@@ -87,6 +88,8 @@ class AliyunClient:
         if response_json['Message'] == 'success':
             print("停止消息接收成功")
         task_status = response_json['Data']['TaskStatus']
+        print(task_status)
+        print(task_id)
         return task_status
 
     def get_result(self, task_id):
@@ -97,19 +100,22 @@ class AliyunClient:
         # TODO 当task_status == 'ONGOING'时response_json的Data中并没有result
         if response_json['Message'] == 'success':
             print("查询消息接收成功")
+        result = response_json['Data'].get('Result', {})
+        print(response_json)
         task_status = response_json['Data']['TaskStatus']
         if task_status == 'FAILED':
             print('FAILED' + response_json['Data']['ErrorCode'] + response_json['Data']['ErrorMessage'])
-        # if task_status == 'ONGOING' and not response_json['Data']['Result']:
-        #     print("ONGOING BUT NOT RESULT")
-        #     return None
-        # if task_status == 'ONGOING' and response_json['Data']['Result']:
-        #     print("ONGOING AND RESULT")
-        #     return response_json['Data']['Result']
+            return "FAILED", result
+        if task_status == 'ONGOING' and not result:
+            print("ONGOING BUT NOT RESULT")
+            return "ONGOING", result
+        if task_status == 'ONGOING' and result:
+            print("ONGOING AND RESULT")
+            return "ONGONING && SOME RESULT", result
         if task_status == 'COMPLETED':
             print("COMPLETED")
-            return response_json['Data']['Result']
-        return "get_result_return"
+            return "COMPLETED", result
+        return "OTHER", {"1":"2"}
 
 
 class RealtimeMeetingRecorder:
@@ -158,8 +164,8 @@ class RealtimeMeetingRecorder:
         self.task_id = task_response[0]
         self.meeting_join_url = task_response[1]
 
-        # print(f"TaskId: {self.task_id}")
-        # print(f"MeetingJoinUrl: {self.meeting_join_url}")
+        print(f"TaskId: {self.task_id}")
+        print(f"MeetingJoinUrl: {self.meeting_join_url}")
 
         # 初始化会议实例
         self.rm = nls.NlsRealtimeMeeting(
@@ -178,8 +184,16 @@ class RealtimeMeetingRecorder:
             self.rm = None
         if self.task_id:
             self.aliyun_client.stop_task(self.task_id)
-            self.summary = self.aliyun_client.get_result(self.task_id)
-            # return result.get('Summarization', {}).get('Paragraph', '')
+
+    def get_summary(self):
+        if self.task_id:
+            message,json_result = self.aliyun_client.get_result(self.task_id)
+            print(message)
+            print(json_result)
+            return message, json_result
+        else:
+            return "NO_TASK_ID", {1,2}  # 确保返回一个元组
+
 
     def send_audio(self, audio_data):
         if self.rm and self.is_recording:
@@ -236,20 +250,20 @@ def app(status_indicator, webrtc_ctx, recorder):
 
 
 def main():
+    aliyun_client = AliyunClient(
+        access_key_id=config.ALIBABA_CLOUD_ACCESS_KEY_ID,
+        access_key_secret=config.ALIBABA_CLOUD_ACCESS_KEY_SECRET,
+        app_key=config.APP_KEY
+    )
     st.set_page_config(page_title="会议记录与总结软件", layout="wide")
     st.title("会议记录与总结软件")
     if 'transcription' not in st.session_state:
         st.session_state.transcription = ""
     if 'summary' not in st.session_state:
         st.session_state.summary = ""
-
-    aliyun_client = AliyunClient(
-        access_key_id=config.ALIBABA_CLOUD_ACCESS_KEY_ID,
-        access_key_secret=config.ALIBABA_CLOUD_ACCESS_KEY_SECRET,
-        app_key=config.APP_KEY
-    )
-    # 初始化 RealtimeMeetingRecorder 实例
-    recorder = RealtimeMeetingRecorder(config.NLS_URL, aliyun_client)
+    if 'recorder' not in st.session_state:
+        st.session_state.recorder = RealtimeMeetingRecorder(config.NLS_URL, aliyun_client)
+    recorder = st.session_state.recorder
     # 设置 WebRTC 配置
     rtc_configuration = {
         'iceServers': [
@@ -264,20 +278,6 @@ def main():
 
     # 实现Streamlit界面和交互逻辑
     col1, col2 = st.columns(2)
-
-    with col2:
-        st.subheader("会议内容")
-        st.text_area("转录内容", value=st.session_state.transcription, height=250, key="transcription_area")
-        col2_col1, col2_col2 = st.columns(2)
-        with col2_col1:
-            if st.button("生成摘要"):
-                # TODO 生成摘要
-                st.session_state.summary = recorder.summary
-                pass
-        with col2_col2:
-            if st.button("获取音频"):
-                # TODO 获取会议音频
-                pass
 
     with col1:
         st.subheader("控制面板")
@@ -295,6 +295,24 @@ def main():
             status_indicator.write("正在启动会议...")
             recorder.start_recording()
             app(status_indicator, webrtc_ctx, recorder)
+
+        
+
+    with col2:
+        st.subheader("会议内容")
+        st.text_area("转录内容", value=st.session_state.transcription, height=250, key="transcription_area")
+        col2_col1, col2_col2 = st.columns(2)
+        with col2_col1:
+            if st.button("显示摘要"):
+                message, json_result = recorder.get_summary() 
+                # print(recorder.transcription)     
+                # print(message)         
+                if(message == "COMPLETED"):
+                    st.session_state.summary = tool.req_summary(json_result)
+        with col2_col2:
+            if st.button("获取音频"):
+                # TODO 获取会议音频
+                pass
 
     st.subheader("会议摘要")
     st.text_area("摘要内容", value=st.session_state.summary, height=200, key="summary_area")
