@@ -1,14 +1,10 @@
 # app.py
-<<<<<<< HEAD
-import threading
-import streamlit as st
-=======
+import os
 import nls
 import json
 import time
 import queue
 import pydub
->>>>>>> f2a6b2d (重构项目&完善录音逻辑&完成实时转录)
 import config
 import streamlit as st
 import tool
@@ -50,10 +46,11 @@ class AliyunClient:
                 },
                 "Parameters": {
                     "Transcription": {
-                        "OutputLevel": 2,
+                        "OutputLevel": 1,
                         "DiarizationEnabled": True,
                         "Diarization": {"SpeakerCount": 2}
                     },
+                    "AutoChaptersEnabled": True,
                     "SummarizationEnabled": summarization_enabled,
                     "Summarization": {
                         "Types": ["Paragraph", "Conversational"]
@@ -261,6 +258,8 @@ def main():
         st.session_state.transcription = ""
     if 'summary' not in st.session_state:
         st.session_state.summary = ""
+    if 'title' not in st.session_state:
+        st.session_state.title = ""
     if 'recorder' not in st.session_state:
         st.session_state.recorder = RealtimeMeetingRecorder(config.NLS_URL, aliyun_client)
     recorder = st.session_state.recorder
@@ -304,30 +303,66 @@ def main():
         col2_col1, col2_col2 = st.columns(2)
         with col2_col1:
             if st.button("显示摘要"):
-                message, json_result = recorder.get_summary() 
-                # print(recorder.transcription)     
-                # print(message)         
+                message, json_result = recorder.get_summary()         
                 if(message == "COMPLETED"):
                     st.session_state.summary = tool.req_summary(json_result)
+                    st.session_state.title = tool.req_head(json_result)
+                if(message == "NO_TASK_ID"):
+                    st.session_state.summary = "摘要任务还未处理完！"
         with col2_col2:
             if st.button("获取音频"):
                 # TODO 获取会议音频
                 pass
 
     st.subheader("会议摘要")
-    st.text_area("摘要内容", value=st.session_state.summary, height=200, key="summary_area")
+    st.text_area("摘要内容", value=st.session_state.summary, height=400, key="summary_area")
 
-    # TODO 会议文本管理功能
+    # 会议文本管理功能
+    # 设置保存路径
+    save_path = "saved_meeting_records"
+
+    # 如果保存路径不存在，则创建
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    # 页面标题
     st.subheader("会议记录管理")
-    if st.button("保存会议记录"):
-        # 这里应该实现保存功能，比如保存到文件或数据库
-        st.success("会议记录已保存")
 
+    # 获取会议记录的key和标题
+    meeting_title = st.session_state.title
+    summary = st.session_state.summary
+    transcription = st.session_state.transcription
+    # 保存会议记录
+    if st.button("保存会议记录"):
+        if meeting_title and summary:
+            file_path = os.path.join(save_path, f"{meeting_title}.txt")
+            # 将key和summary写入文件，并在它们之间分段
+            with open(file_path, "w") as f:
+                # 写入Key部分
+                f.write(f"key:\n{meeting_title}\n\n")  # \n\n 用于在key部分和summary部分之间添加空行
+                # 写入Summary部分
+                f.write(f"summary:\n{summary}\n")
+                st.success(f"会议记录'{meeting_title}'已保存")
+        else:
+            st.error("会议记录标题和内容不存在")
+
+    # 清除当前记录
     if st.button("清除当前记录"):
         st.session_state.transcription = ""
         st.session_state.summary = ""
+        st.session_state.title = ""
         st.experimental_rerun()
 
+    # 显示已保存的会议记录
+    st.subheader("已保存的会议记录")
+    saved_records = os.listdir(save_path)
+    if saved_records:
+        selected_record = st.selectbox("选择一个会议记录查看", saved_records)
+        if selected_record:
+            with open(os.path.join(save_path, selected_record), "r") as f:
+                st.text(f.read())
+    else:
+        st.info("当前没有已保存的会议记录")
 
 if __name__ == "__main__":
     main()
