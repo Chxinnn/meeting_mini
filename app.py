@@ -6,8 +6,8 @@ import time
 import queue
 import pydub
 import config
+import requests
 import streamlit as st
-import tool
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
 from aliyunsdkcore.auth.credentials import AccessKeyCredential
@@ -244,6 +244,51 @@ def app(status_indicator, webrtc_ctx, recorder):
         recorder.stop_recording()
 
 
+def req_head(json_result):
+    autochapters_url = json_result.get('AutoChapters')
+    if autochapters_url:
+        response = requests.get(autochapters_url)
+        if response.status_code == 200:
+            autochapters_content = response.json()
+            if 'AutoChapters' in autochapters_content:
+                headline = dict(autochapters_content['AutoChapters'][0]).get("Headline")
+                return headline
+            else:
+                # 如果AutoChapters字段不存在，返回基于当前时间的唯一标识
+                file_name = f"{time.strftime('%Y_%m_%d_%H_%M_%S', time.localtime(time.time()))}"
+                return file_name
+        else:
+            return f"Failed to retrieve data from {autochapters_url}, status code: {response.status_code}"
+    else:
+        return "autochapters URL not found in json_result"
+
+
+# 假设 json_result 是你已经获得的 JSON 数据
+def req_summary(json_result):
+    # 获取 Summarization URL
+    summarization_url = json_result.get('Summarization')
+
+    # 从URL中获取JSON内容
+    if summarization_url:
+        response = requests.get(summarization_url)
+        if response.status_code == 200:
+            summarization_content = response.json()
+            if not summarization_content['Summarization']:
+                return "ConversationalSummary not found"
+            speaker_summary = {
+                item['SpeakerName']: item['Summary'] + '\n'
+                for item in summarization_content['Summarization']['ConversationalSummary']
+            }
+        else:
+            return f"Failed to retrieve data from {summarization_url}, status code: {response.status_code}"
+    else:
+        return "Summarization URL not found in json_result"
+    # 将字典转换为字符串并去掉括号
+    formatted_speaker_summary = "".join(
+        [f"{speaker}:\n\t{summary.strip()}\n" for speaker, summary in speaker_summary.items()])
+    return formatted_speaker_summary
+
+
 def main():
     aliyun_client = AliyunClient(
         access_key_id=config.ALIBABA_CLOUD_ACCESS_KEY_ID,
@@ -301,12 +346,14 @@ def main():
             if st.button("显示摘要"):
                 message, json_result = recorder.get_summary()
                 if message == "COMPLETED":
-                    summary = tool.req_summary(json_result)
+                    summary = req_summary(json_result)
                     if summary == "ConversationalSummary not found":
                         st.session_state.summary = "会议录音内容不足！"
                     else:
-                        st.session_state.summary = tool.req_summary(json_result)
-                    st.session_state.title = tool.req_head(json_result)
+                        headline = req_head(json_result)
+                        summary = req_summary(json_result)
+                        st.session_state.title = headline
+                        st.session_state.summary = f"标题：\n{headline}\n\n总结：\n{summary}\n"
                 if message == "ONGOING BUT NOT RESULT" or message == "ONGOING && SOME RESULT":
                     st.session_state.summary = "摘要任务处理中..."
                 if message == "NO_TASK_ID":
@@ -338,15 +385,14 @@ def main():
     if st.button("保存会议记录"):
         if meeting_title and summary:
             file_path = os.path.join(save_path, f"{meeting_title}.txt")
-            # 将key和summary写入文件，并在它们之间分段
+            # 将标题和摘要写入文件，并在它们之间分段
             with open(file_path, "w") as f:
-                # 写入Key部分
-                f.write(f"key:\n{meeting_title}\n\n")  # \n\n 用于在key部分和summary部分之间添加空行
-                # 写入Summary部分
-                f.write(f"summary:\n{summary}\n")
-                st.success(f"会议记录'{meeting_title}'已保存")
-        else:
-            st.error("会议记录标题和内容不存在")
+                f.write(summary)
+                st.success(f"会议记录已保存至‘{meeting_title}.txt’中")
+        elif not meeting_title:
+            st.error("会议记录文件名生成失败!")
+        elif not summary:
+            st.error("未生成会议摘要!")
 
     # 清除当前记录
     if st.button("清除当前记录"):
