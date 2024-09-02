@@ -94,7 +94,6 @@ class AliyunClient:
         response = self.client.do_action_with_exception(request)
         response_json = json.loads(response)
         print(json.dumps(response_json, indent=4, ensure_ascii=False))
-        # TODO 当task_status == 'ONGOING'时response_json的Data中并没有result
         if response_json['Message'] == 'success':
             print("查询消息接收成功")
         result = response_json['Data'].get('Result', {})
@@ -105,14 +104,14 @@ class AliyunClient:
             return "FAILED", result
         if task_status == 'ONGOING' and not result:
             print("ONGOING BUT NOT RESULT")
-            return "ONGOING", result
+            return "ONGOING BUT NOT RESULT", result
         if task_status == 'ONGOING' and result:
             print("ONGOING AND RESULT")
-            return "ONGONING && SOME RESULT", result
+            return "ONGOING && SOME RESULT", result
         if task_status == 'COMPLETED':
             print("COMPLETED")
             return "COMPLETED", result
-        return "OTHER", {"1":"2"}
+        return "OTHER", {"1": "2"}
 
 
 class RealtimeMeetingRecorder:
@@ -184,13 +183,12 @@ class RealtimeMeetingRecorder:
 
     def get_summary(self):
         if self.task_id:
-            message,json_result = self.aliyun_client.get_result(self.task_id)
+            message, json_result = self.aliyun_client.get_result(self.task_id)
             print(message)
             print(json_result)
             return message, json_result
         else:
-            return "NO_TASK_ID", {1,2}  # 确保返回一个元组
-
+            return "NO_TASK_ID", {1, 2}  # 确保返回一个元组
 
     def send_audio(self, audio_data):
         if self.rm and self.is_recording:
@@ -295,20 +293,24 @@ def main():
             recorder.start_recording()
             app(status_indicator, webrtc_ctx, recorder)
 
-        
-
     with col2:
         st.subheader("会议内容")
         st.text_area("转录内容", value=st.session_state.transcription, height=250, key="transcription_area")
         col2_col1, col2_col2 = st.columns(2)
         with col2_col1:
             if st.button("显示摘要"):
-                message, json_result = recorder.get_summary()         
-                if(message == "COMPLETED"):
-                    st.session_state.summary = tool.req_summary(json_result)
+                message, json_result = recorder.get_summary()
+                if message == "COMPLETED":
+                    summary = tool.req_summary(json_result)
+                    if summary == "ConversationalSummary not found":
+                        st.session_state.summary = "会议录音内容不足！"
+                    else:
+                        st.session_state.summary = tool.req_summary(json_result)
                     st.session_state.title = tool.req_head(json_result)
-                if(message == "NO_TASK_ID"):
-                    st.session_state.summary = "摘要任务还未处理完！"
+                if message == "ONGOING BUT NOT RESULT" or message == "ONGOING && SOME RESULT":
+                    st.session_state.summary = "摘要任务处理中..."
+                if message == "NO_TASK_ID":
+                    st.session_state.summary = "无会议记录！"
         with col2_col2:
             if st.button("获取音频"):
                 # TODO 获取会议音频
@@ -351,6 +353,8 @@ def main():
         st.session_state.transcription = ""
         st.session_state.summary = ""
         st.session_state.title = ""
+        st.session_state.recorder.task_id = None
+        st.session_state.recorder.transcription = ""
         st.experimental_rerun()
 
     # 显示已保存的会议记录
@@ -363,6 +367,7 @@ def main():
                 st.text(f.read())
     else:
         st.info("当前没有已保存的会议记录")
+
 
 if __name__ == "__main__":
     main()
