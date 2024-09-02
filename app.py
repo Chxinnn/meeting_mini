@@ -353,7 +353,7 @@ def main():
                         headline = req_head(json_result)
                         summary = req_summary(json_result)
                         st.session_state.title = headline
-                        st.session_state.summary = f"标题：\n{headline}\n\n总结：\n{summary}\n"
+                        st.session_state.summary = f"标题：\n{headline}\n\n会议内容：\n{st.session_state.transcription}\n总结：\n{summary}\n"
                 if message == "ONGOING BUT NOT RESULT" or message == "ONGOING && SOME RESULT":
                     st.session_state.summary = "摘要任务处理中..."
                 if message == "NO_TASK_ID":
