@@ -341,27 +341,23 @@ def main():
     with col2:
         st.subheader("会议内容")
         st.text_area("转录内容", value=st.session_state.transcription, height=250, key="transcription_area")
-        col2_col1, col2_col2 = st.columns(2)
-        with col2_col1:
-            if st.button("显示摘要"):
-                message, json_result = recorder.get_summary()
-                if message == "COMPLETED":
+        if st.button("显示摘要"):
+            message, json_result = recorder.get_summary()
+            if message == "COMPLETED":
+                summary = req_summary(json_result)
+                if summary == "ConversationalSummary not found":
+                    st.session_state.summary = "会议录音内容不足！"
+                else:
+                    headline = req_head(json_result)
                     summary = req_summary(json_result)
-                    if summary == "ConversationalSummary not found":
-                        st.session_state.summary = "会议录音内容不足！"
-                    else:
-                        headline = req_head(json_result)
-                        summary = req_summary(json_result)
-                        st.session_state.title = headline
-                        st.session_state.summary = f"标题：\n{headline}\n\n会议内容：\n{st.session_state.transcription}\n总结：\n{summary}\n"
-                if message == "ONGOING BUT NOT RESULT" or message == "ONGOING && SOME RESULT":
-                    st.session_state.summary = "摘要任务处理中..."
-                if message == "NO_TASK_ID":
-                    st.session_state.summary = "无会议记录！"
-        with col2_col2:
-            if st.button("获取音频"):
-                # TODO 获取会议音频
-                pass
+                    st.session_state.title = headline
+                    st.session_state.summary = f"标题：\n{headline}\n\n" \
+                                               f"会议内容：\n{st.session_state.transcription}\n" \
+                                               f"总结：\n{summary}\n"
+            if message == "ONGOING BUT NOT RESULT" or message == "ONGOING && SOME RESULT":
+                st.session_state.summary = "摘要任务处理中..."
+            if message == "NO_TASK_ID":
+                st.session_state.summary = "无会议记录！"
 
     st.subheader("会议摘要")
     st.text_area("摘要内容", value=st.session_state.summary, height=400, key="summary_area")
@@ -374,45 +370,48 @@ def main():
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
-    # 页面标题
-    st.subheader("会议记录管理")
+    col3, col4 = st.columns(2)
 
-    # 获取会议记录的key和标题
-    meeting_title = st.session_state.title
-    summary = st.session_state.summary
-    transcription = st.session_state.transcription
-    # 保存会议记录
-    if st.button("保存会议记录"):
-        if meeting_title and summary:
-            file_path = os.path.join(save_path, f"{meeting_title}.txt")
-            # 将标题和摘要写入文件，并在它们之间分段
-            with open(file_path, "w") as f:
-                f.write(summary)
-                st.success(f"会议记录已保存至‘{meeting_title}.txt’中")
-        elif not meeting_title:
-            st.error("会议记录文件名生成失败!")
-        elif not summary:
-            st.error("未生成会议摘要!")
+    with col3:
+        # 页面标题
+        st.subheader("会议记录管理")
 
-    # 清除当前记录
-    if st.button("清除当前记录"):
-        st.session_state.transcription = ""
-        st.session_state.summary = ""
-        st.session_state.title = ""
-        st.session_state.recorder.task_id = None
-        st.session_state.recorder.transcription = ""
-        st.experimental_rerun()
+        # 获取会议记录的key和标题r
+        meeting_title = st.session_state.title
+        summary = st.session_state.summary
+        # 保存会议记录
+        if st.button("保存会议记录"):
+            if meeting_title and summary:
+                file_path = os.path.join(save_path, f"{meeting_title}.txt")
+                # 将标题和摘要写入文件，并在它们之间分段
+                with open(file_path, "w") as f:
+                    f.write(summary)
+                    st.success(f"会议记录已保存至‘{meeting_title}.txt’中")
+            elif not meeting_title:
+                st.error("会议记录文件名生成失败!")
+            elif not summary:
+                st.error("未生成会议摘要!")
 
-    # 显示已保存的会议记录
-    st.subheader("已保存的会议记录")
-    saved_records = os.listdir(save_path)
-    if saved_records:
-        selected_record = st.selectbox("选择一个会议记录查看", saved_records)
-        if selected_record:
-            with open(os.path.join(save_path, selected_record), "r") as f:
-                st.text(f.read())
-    else:
-        st.info("当前没有已保存的会议记录")
+        # 清除当前记录
+        if st.button("清除当前记录"):
+            st.session_state.transcription = ""
+            st.session_state.summary = ""
+            st.session_state.title = ""
+            st.session_state.recorder.task_id = None
+            st.session_state.recorder.transcription = ""
+            st.experimental_rerun()
+
+    with col4:
+        # 显示已保存的会议记录
+        st.subheader("已保存的会议记录")
+        saved_records = os.listdir(save_path)
+        if saved_records:
+            selected_record = st.selectbox("选择一个会议记录查看", saved_records)
+            if selected_record:
+                with open(os.path.join(save_path, selected_record), "r") as f:
+                    st.text_area("会议记录", value=f.read(), height=400)
+        else:
+            st.info("当前没有已保存的会议记录")
 
 
 if __name__ == "__main__":
