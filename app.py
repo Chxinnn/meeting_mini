@@ -180,6 +180,7 @@ class RealtimeMeetingRecorder:
             self.rm = None
         if self.task_id:
             self.aliyun_client.stop_task(self.task_id)
+        self.transcription = ""
 
     def get_summary(self):
         if self.task_id:
