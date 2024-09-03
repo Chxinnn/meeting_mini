@@ -1,15 +1,18 @@
+# app.py
 import os
 import nls
 import json
 import time
-import sounddevice as sd
-import threading
-import streamlit as st
-import requests
+import queue
+import pydub
 import config
+import requests
+import streamlit as st
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
 from aliyunsdkcore.auth.credentials import AccessKeyCredential
+from streamlit_webrtc import WebRtcMode, webrtc_streamer
+
 
 class AliyunClient:
     def __init__(self, access_key_id, access_key_secret, app_key, region_id='cn-beijing'):
@@ -110,27 +113,57 @@ class AliyunClient:
             return "COMPLETED", result
         return "OTHER", {"1": "2"}
 
-class LocalAudioRecorder:
-    def __init__(self, aliyun_client):
+
+class RealtimeMeetingRecorder:
+    def __init__(self, url, aliyun_client):
+        self.url = url
         self.aliyun_client = aliyun_client
         self.is_recording = False
         self.task_id = None
         self.meeting_join_url = None
         self.rm = None
         self.transcription = ""
+        # self.transcription_callback = None
         self.summary = ""
-        self.recording_thread = None
-        
+
+    # def set_transcription_callback(self, callback):
+    #     self.transcription_callback = callback
+
+    # 实现各种回调方法和录音逻辑
+    def on_sentence_begin(self, message, *args):
+        # print("Sentence begin:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
+        print("Sentence begin")
+
+    def on_sentence_end(self, message, *args):
+        # print("Sentence end:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
+        print("Sentence end")
+        sentence = json.loads(message)['payload']['result']
+        print(sentence)
+        self.transcription += f"{sentence}\n"
+        # if self.transcription_callback:
+        #     self.transcription_callback(self.transcription)
+
+    def on_result_changed(self, message, *args):
+        # print("Result changed:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
+        # print("Result changed")
+        pass
+
+    def on_completed(self, message, *args):
+        # print("Completed:", json.dumps(json.loads(message), indent=4, ensure_ascii=False))
+        pass
+
     def start_recording(self):
         self.is_recording = True
         task_response = self.aliyun_client.create_task(summarization_enabled=True)
+        print("start_recording")
+        print("task创建完成")
         self.task_id = task_response[0]
         self.meeting_join_url = task_response[1]
-        
+
         print(f"TaskId: {self.task_id}")
         print(f"MeetingJoinUrl: {self.meeting_join_url}")
-        
-        # 初始化NlsRealtimeMeeting
+
+        # 初始化会议实例
         self.rm = nls.NlsRealtimeMeeting(
             url=self.meeting_join_url,
             on_sentence_begin=self.on_sentence_begin,
@@ -139,49 +172,14 @@ class LocalAudioRecorder:
             on_completed=self.on_completed
         )
         self.rm.start()
-        
-        # 开始录音线程
-        self.recording_thread = threading.Thread(target=self._record_audio)
-        self.recording_thread.start()
-    
-    def _record_audio(self):
 
-        sample_rate = 16000
-        samples_per_read = int(0.1 * sample_rate)
-        with sd.InputStream(channels=1, dtype="int16", samplerate=sample_rate) as stream:
-            while self.is_recording:
-                samples, overflowed = stream.read(samples_per_read)
-                if overflowed:
-                    print("Audio buffer has overflowed")
-                self.rm.send_audio(samples.tobytes())
-                time.sleep(0.01)
-
-        
     def stop_recording(self):
         self.is_recording = False
-        if self.recording_thread:
-            self.recording_thread.join()  # 等待录音线程结束
-            self.recording_thread = None
         if self.rm is not None:
             self.rm.stop()
             self.rm = None
         if self.task_id:
             self.aliyun_client.stop_task(self.task_id)
-
-    def on_sentence_begin(self, message, *args):
-        print("Sentence begin")
-
-    def on_sentence_end(self, message, *args):
-        print("Sentence end")
-        sentence = json.loads(message)['payload']['result']
-        print(sentence)
-        self.transcription += f"{sentence}\n"
-
-    def on_result_changed(self, message, *args):
-        pass
-
-    def on_completed(self, message, *args):
-        pass
 
     def get_summary(self):
         if self.task_id:
@@ -190,7 +188,61 @@ class LocalAudioRecorder:
             print(json_result)
             return message, json_result
         else:
-            return "NO_TASK_ID", {1: 2}
+            return "NO_TASK_ID", {1, 2}  # 确保返回一个元组
+
+    def send_audio(self, audio_data):
+        if self.rm and self.is_recording:
+            self.rm.send_audio(audio_data)
+
+
+def app(status_indicator, webrtc_ctx, recorder):
+    realtime_output = st.empty()
+    try:
+        # 主循环
+        while recorder.is_recording:
+            if webrtc_ctx.audio_receiver:
+                # 创建一个空的 AudioSegment 对象用于存储接收到的音频数据
+                sound_chunk = pydub.AudioSegment.empty()
+
+                # 尝试从音频接收器获取音频帧
+                try:
+                    audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
+                except queue.Empty:
+                    # 如果没有数据可用，等待一段时间并继续循环
+                    time.sleep(0.1)
+                    status_indicator.write("无音频帧输入！.")
+                    continue
+
+                status_indicator.write("启动成功！正在录音...")
+
+                # 对每个音频帧进行处理
+                for audio_frame in audio_frames:
+                    # 将音频帧转换为 pydub 的 AudioSegment 对象
+                    sound = pydub.AudioSegment(
+                        data=audio_frame.to_ndarray().tobytes(),
+                        sample_width=audio_frame.format.bytes,
+                        frame_rate=audio_frame.sample_rate,
+                        channels=len(audio_frame.layout.channels),
+                    )
+                    # 将当前音频片段添加到 sound_chunk
+                    sound_chunk += sound
+
+                if len(sound_chunk) > 0:
+                    # 将音频调整为单声道并设置为 16kHz 采样率
+                    sound_chunk = sound_chunk.set_channels(1).set_frame_rate(16000)
+                    # 将音频数据转换为字节流并传递给 NlsRealtimeMeeting 实例
+                    audio_data = sound_chunk.raw_data
+                    recorder.rm.send_audio(audio_data)
+                    # print(recorder.transcription)
+                    st.session_state.transcription = recorder.transcription
+                    realtime_output.markdown(f"**实时转录:** {recorder.transcription}")
+            else:
+                # 如果没有音频接收器，则结束循环
+                status_indicator.write("AudioReceiver is not set. Abort.")
+                break
+    finally:
+        recorder.stop_recording()
+
 
 def req_head(json_result):
     autochapters_url = json_result.get('AutoChapters')
@@ -202,6 +254,7 @@ def req_head(json_result):
                 headline = dict(autochapters_content['AutoChapters'][0]).get("Headline")
                 return headline
             else:
+                # 如果AutoChapters字段不存在，返回基于当前时间的唯一标识
                 file_name = f"{time.strftime('%Y_%m_%d_%H_%M_%S', time.localtime(time.time()))}"
                 return file_name
         else:
@@ -209,8 +262,13 @@ def req_head(json_result):
     else:
         return "autochapters URL not found in json_result"
 
+
+# 假设 json_result 是你已经获得的 JSON 数据
 def req_summary(json_result):
+    # 获取 Summarization URL
     summarization_url = json_result.get('Summarization')
+
+    # 从URL中获取JSON内容
     if summarization_url:
         response = requests.get(summarization_url)
         if response.status_code == 200:
@@ -225,9 +283,11 @@ def req_summary(json_result):
             return f"Failed to retrieve data from {summarization_url}, status code: {response.status_code}"
     else:
         return "Summarization URL not found in json_result"
+    # 将字典转换为字符串并去掉括号
     formatted_speaker_summary = "".join(
         [f"{speaker}:\n\t{summary.strip()}\n" for speaker, summary in speaker_summary.items()])
     return formatted_speaker_summary
+
 
 def main():
     aliyun_client = AliyunClient(
@@ -235,29 +295,40 @@ def main():
         access_key_secret=config.ALIBABA_CLOUD_ACCESS_KEY_SECRET,
         app_key=config.APP_KEY
     )
-    
     st.set_page_config(page_title="会议记录与总结软件", layout="wide")
     st.title("会议记录与总结软件")
-    
+    if 'transcription' not in st.session_state:
+        st.session_state.transcription = ""
+    if 'summary' not in st.session_state:
+        st.session_state.summary = ""
+    if 'title' not in st.session_state:
+        st.session_state.title = ""
     if 'recorder' not in st.session_state:
-        st.session_state.recorder = LocalAudioRecorder(aliyun_client)
+        st.session_state.recorder = RealtimeMeetingRecorder(config.NLS_URL, aliyun_client)
     recorder = st.session_state.recorder
-    
+
+    # 实现Streamlit界面和交互逻辑
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.subheader("控制面板")
-        if st.button("开始录音"):
+        webrtc_ctx = webrtc_streamer(
+            key="speech-to-text",
+            mode=WebRtcMode.SENDONLY,
+            audio_receiver_size=20480,
+            media_stream_constraints={"video": False, "audio": True},
+        )
+
+        status_indicator = st.empty()
+
+        if webrtc_ctx.state.playing:
+            status_indicator.write("正在启动会议...")
             recorder.start_recording()
-            st.success("录音已开始")
-        
-        if st.button("停止录音"):
-            recorder.stop_recording()
-            st.success("录音已停止")
-        
+            app(status_indicator, webrtc_ctx, recorder)
+
     with col2:
         st.subheader("会议内容")
-        st.text_area("转录内容", value=recorder.transcription, height=250, key="transcription_area")
+        st.text_area("转录内容", value=st.session_state.transcription, height=250, key="transcription_area")
         if st.button("显示摘要"):
             message, json_result = recorder.get_summary()
             if message == "COMPLETED":
@@ -269,46 +340,57 @@ def main():
                     summary = req_summary(json_result)
                     st.session_state.title = headline
                     st.session_state.summary = f"标题：\n{headline}\n\n" \
-                                               f"会议内容：\n{recorder.transcription}\n" \
+                                               f"会议内容：\n{st.session_state.transcription}\n" \
                                                f"总结：\n{summary}\n"
-            elif message in ["ONGOING BUT NOT RESULT", "ONGOING && SOME RESULT"]:
+            if message == "ONGOING BUT NOT RESULT" or message == "ONGOING && SOME RESULT":
                 st.session_state.summary = "摘要任务处理中..."
-            elif message == "NO_TASK_ID":
+            if message == "NO_TASK_ID":
                 st.session_state.summary = "无会议记录！"
 
     st.subheader("会议摘要")
-    st.text_area("摘要内容", value=st.session_state.summary if 'summary' in st.session_state else "", height=400, key="summary_area")
+    st.text_area("摘要内容", value=st.session_state.summary, height=400, key="summary_area")
 
     # 会议文本管理功能
+    # 设置保存路径
     save_path = "saved_meeting_records"
+
+    # 如果保存路径不存在，则创建
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
     col3, col4 = st.columns(2)
 
     with col3:
+        # 页面标题
         st.subheader("会议记录管理")
-        meeting_title = st.session_state.title if 'title' in st.session_state else ""
-        summary = st.session_state.summary if 'summary' in st.session_state else ""
+
+        # 获取会议记录的key和标题r
+        meeting_title = st.session_state.title
+        summary = st.session_state.summary
+        # 保存会议记录
         if st.button("保存会议记录"):
             if meeting_title and summary:
                 file_path = os.path.join(save_path, f"{meeting_title}.txt")
+                # 将标题和摘要写入文件，并在它们之间分段
                 with open(file_path, "w") as f:
                     f.write(summary)
-                st.success(f"会议记录已保存至'{meeting_title}.txt'中")
+                    st.success(f"会议记录已保存至‘{meeting_title}.txt’中")
             elif not meeting_title:
                 st.error("会议记录文件名生成失败!")
             elif not summary:
                 st.error("未生成会议摘要!")
 
+        # 清除当前记录
         if st.button("清除当前记录"):
-            recorder.transcription = ""
+            st.session_state.transcription = ""
             st.session_state.summary = ""
             st.session_state.title = ""
-            recorder.task_id = None
+            st.session_state.recorder.task_id = None
+            st.session_state.recorder.transcription = ""
             st.experimental_rerun()
 
     with col4:
+        # 显示已保存的会议记录
         st.subheader("已保存的会议记录")
         saved_records = os.listdir(save_path)
         if saved_records:
@@ -318,6 +400,7 @@ def main():
                     st.text_area("会议记录", value=f.read(), height=400)
         else:
             st.info("当前没有已保存的会议记录")
+
 
 if __name__ == "__main__":
     main()
