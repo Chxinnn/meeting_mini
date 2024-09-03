@@ -155,7 +155,7 @@ class LocalAudioRecorder:
                     print("Audio buffer has overflowed")
                 self.rm.send_audio(samples.tobytes())
                 time.sleep(0.01)
-
+                
         
     def stop_recording(self):
         self.is_recording = False
@@ -254,10 +254,20 @@ def main():
         if st.button("停止录音"):
             recorder.stop_recording()
             st.success("录音已停止")
+
+        transcription_box = st.empty()  # 占位符
+        try:
+            while recorder.is_recording:
+                # 只更新 text_area 的内容，不重新创建它
+                transcription_box.write(recorder.transcription)
+                time.sleep(1)  # 每秒刷新一次变量的值
+        except KeyboardInterrupt:
+            print("程序结束")
         
     with col2:
         st.subheader("会议内容")
         st.text_area("转录内容", value=recorder.transcription, height=250, key="transcription_area")
+        
         if st.button("显示摘要"):
             message, json_result = recorder.get_summary()
             if message == "COMPLETED":
